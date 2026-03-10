@@ -262,7 +262,7 @@ func (r *Runner) Run() error {
 		step(r.doAssert) &&
 		step(r.doTeardown)
 
-	assert.Nil(r.T, err, "unexpected running error")
+	assert.NoError(r.T, err, "unexpected running error")
 
 	return err
 }
