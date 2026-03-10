@@ -1,0 +1,34 @@
+version: '3'
+
+tasks:
+  format:
+    desc: run the linter formatter against the entire code base
+    preconditions:
+      - sh: 'golangci-lint version'
+        msg: "golangci-lint not installed, please refer to https://golangci-lint.run/"
+    cmds:
+      - golangci-lint fmt
+
+  lint:
+    desc: run the linter against the entire code base
+    preconditions:
+      - sh: 'golangci-lint version'
+        msg: "golangci-lint not installed, please refer to https://golangci-lint.run/"
+    cmds:
+      - golangci-lint run
+
+  tests:
+    desc: run the test suite
+    preconditions:
+      - sh: 'go version'
+        msg: "go not installed, please refer to https://go.dev/"
+    cmds:
+      - go test $(go list ./tests/... | grep -v /mocks)
+
+  tests-coverage:
+    desc: run the test suite with coverage
+    preconditions:
+      - sh: 'go version'
+        msg: "go not installed, please refer to https://go.dev/"
+    cmds:
+      - go test -coverpkg=. -cover $(go list ./tests/... | grep -v /mocks)
