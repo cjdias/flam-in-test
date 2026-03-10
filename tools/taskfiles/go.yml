@@ -1,0 +1,11 @@
+version: '3'
+
+tasks:
+  dep-update:
+    desc: update the dependency packages
+    preconditions:
+      - sh: 'go version'
+        msg: "go not installed, please refer to https://go.dev/"
+    cmds:
+      - cmd: go get -u ./...
+        silent: true

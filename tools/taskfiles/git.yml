@@ -1,0 +1,18 @@
+version: '3'
+
+tasks:
+  reg-hooks:
+    desc: register the project githooks
+    preconditions:
+      - test -f ./.githooks/pre-commit
+      - sh: 'git version'
+        msg: "git not installed, please refer to https://git-scm.com/"
+    cmds:
+      - cmd: git config --local include.path ../.gitconfig
+        silent: true
+
+  pre-commit:
+    desc: run the pre-commit tests
+    cmds:
+      - cmd: ./tools/scripts/pre-commit.sh
+        silent: true
