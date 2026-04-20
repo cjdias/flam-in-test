@@ -1,0 +1,4 @@
+#!/bin/sh
+
+# Run the pre-commit tests
+./tools/scripts/pre-commit.sh

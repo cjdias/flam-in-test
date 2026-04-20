@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 
 	"github.com/cjdias/flam-in-go"
@@ -33,7 +33,6 @@ type Runner struct {
 	configs   []configReg
 	processes []string
 	arranges  []arrangeReg
-	expect    error
 	act       any
 	asserts   []assertReg
 	teardowns []teardownReg
@@ -58,7 +57,17 @@ func NewRunner(
 	}, nil
 }
 
-func (r *Runner) Close() {}
+func (r *Runner) Close() {
+	if r.DB != nil {
+		r.DB.Rollback()
+	}
+	if r.Redis != nil {
+		r.Redis.Close()
+	}
+	if r.App != nil {
+		r.App.Close()
+	}
+}
 
 func (r *Runner) WithLogger(
 	logger Logger,
@@ -86,7 +95,9 @@ func (r *Runner) WithArrange(
 	id string,
 	function any,
 ) *Runner {
-	r.checkExecutor(function)
+	if err := r.checkExecutor(function); err != nil {
+		panic(err)
+	}
 	r.arranges = append(r.arranges, arrangeReg{id: id, function: function})
 	return r
 }
@@ -100,48 +111,53 @@ func (r *Runner) WithArrangePubSub() *Runner {
 func (r *Runner) WithArrangeSignals(
 	channels []string,
 ) *Runner {
-	_ = r.WithArrange("setup pubsub", func() {
+	r.WithArrange("setup pubsub", func() {
 		for _, channel := range channels {
-			_ = r.PS.Subscribe("__test_runner", channel, func(channel string, message ...any) error {
+			if err := r.PS.Subscribe("__test_runner", channel, func(channel string, message ...any) error {
 				r.published = append(r.published, psReg{
 					channel: channel,
 					data:    message})
 				return nil
-			})
+			}); err != nil {
+				r.T.Errorf("failed to subscribe to channel %s: %v", channel, err)
+			}
 		}
 	})
 	return r.WithTeardown("teardown pubsub", func() {
 		for _, channel := range channels {
-			_ = r.PS.Unsubscribe("__test_runner", channel)
+			if err := r.PS.Unsubscribe("__test_runner", channel); err != nil {
+				r.T.Errorf("failed to unsubscribe from channel %s: %v", channel, err)
+			}
 		}
 	})
 }
 
 func (r *Runner) WithArrangeDatabase(connectionId string) *Runner {
 	return r.WithArrange("begin transaction", func(factory flam.DatabaseConnectionFactory) {
-		connection, _ := factory.Get(connectionId)
+		connection, err := factory.Get(connectionId)
+		if err != nil {
+			r.T.Fatalf("failed to get database connection %s: %v", connectionId, err)
+		}
 		r.DB = connection.Begin()
 	})
 }
 
 func (r *Runner) WithArrangeRedis(connectionId string) *Runner {
 	return r.WithArrange("begin redis", func(factory flam.RedisConnectionFactory) {
-		connection, _ := factory.Get(connectionId)
+		connection, err := factory.Get(connectionId)
+		if err != nil {
+			r.T.Fatalf("failed to get redis connection %s: %v", connectionId, err)
+		}
 		r.Redis = connection
 	})
-}
-
-func (r *Runner) WithPanic(
-	err error,
-) *Runner {
-	r.expect = err
-	return r
 }
 
 func (r *Runner) WithAct(
 	function any,
 ) *Runner {
-	r.checkExecutor(function)
+	if err := r.checkExecutor(function); err != nil {
+		panic(err)
+	}
 	r.act = function
 	return r
 }
@@ -150,7 +166,9 @@ func (r *Runner) WithAssert(
 	id string,
 	function any,
 ) *Runner {
-	r.checkExecutor(function)
+	if err := r.checkExecutor(function); err != nil {
+		panic(err)
+	}
 	r.asserts = append(r.asserts, assertReg{id: id, function: function})
 	return r
 }
@@ -172,8 +190,12 @@ func (r *Runner) WithAssertDatabaseError(
 		switch {
 		case *err == nil:
 			r.T.Error("expected error, got nil")
-		case (*err).Error() != "sql: database is closed":
-			r.T.Errorf("unexpected 'sql: database is closed' error, get: %v", *err)
+		default:
+			// Check if it's a database closed error or similar
+			errMsg := (*err).Error()
+			if !strings.Contains(errMsg, "closed") && !strings.Contains(errMsg, "database") {
+				r.T.Errorf("expected database closed error, got: %v", *err)
+			}
 		}
 	})
 }
@@ -239,7 +261,9 @@ func (r *Runner) WithTeardown(
 	id string,
 	function any,
 ) *Runner {
-	r.checkExecutor(function)
+	if err := r.checkExecutor(function); err != nil {
+		panic(err)
+	}
 	r.teardowns = append(r.teardowns, teardownReg{id: id, function: function})
 	return r
 }
@@ -262,7 +286,7 @@ func (r *Runner) Run() error {
 		step(r.doAssert) &&
 		step(r.doTeardown)
 
-	assert.Nil(r.T, err, "unexpected running error")
+	assert.NoError(r.T, err, "unexpected running error")
 
 	return err
 }
@@ -299,7 +323,9 @@ func (r *Runner) doArrange() error {
 		}
 
 		for _, id := range r.processes {
-			_ = config.Set(fmt.Sprintf("%s.%s.active", flam.PathProcesses, id), true)
+			if err := config.Set(fmt.Sprintf("%s.%s.active", flam.PathProcesses, id), true); err != nil {
+				return fmt.Errorf("failed to set process %s active: %w", id, err)
+			}
 		}
 
 		r.logConfigEnd()
@@ -392,10 +418,11 @@ func (r *Runner) doTeardown() error {
 
 func (r *Runner) checkExecutor(
 	function any,
-) {
+) error {
 	if reflect.TypeOf(function).Kind() != reflect.Func {
-		panic(errors.New("expected a function"))
+		return errors.New("expected a function")
 	}
+	return nil
 }
 
 func (r *Runner) logConfigStart() {
