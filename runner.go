@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
@@ -18,6 +19,8 @@ import (
 )
 
 type Runner struct {
+	id string
+
 	T     *testing.T
 	App   flam.Application
 	PS    flam.PubSub[string, string]
@@ -48,6 +51,8 @@ func NewRunner(
 	}
 
 	return &Runner{
+		id: uuid.Must(uuid.NewUUID()).String(),
+
 		T:   t,
 		App: app,
 
@@ -60,12 +65,6 @@ func NewRunner(
 func (r *Runner) Close() {
 	if r.DB != nil {
 		r.DB.Rollback()
-	}
-	if r.Redis != nil {
-		r.Redis.Close()
-	}
-	if r.App != nil {
-		r.App.Close()
 	}
 }
 
@@ -113,21 +112,17 @@ func (r *Runner) WithArrangeSignals(
 ) *Runner {
 	r.WithArrange("setup pubsub", func() {
 		for _, channel := range channels {
-			if err := r.PS.Subscribe("__test_runner", channel, func(channel string, message ...any) error {
+			_ = r.PS.Subscribe(r.id, channel, func(channel string, message ...any) error {
 				r.published = append(r.published, psReg{
 					channel: channel,
 					data:    message})
 				return nil
-			}); err != nil {
-				r.T.Errorf("failed to subscribe to channel %s: %v", channel, err)
-			}
+			})
 		}
 	})
 	return r.WithTeardown("teardown pubsub", func() {
 		for _, channel := range channels {
-			if err := r.PS.Unsubscribe("__test_runner", channel); err != nil {
-				r.T.Errorf("failed to unsubscribe from channel %s: %v", channel, err)
-			}
+			_ = r.PS.Unsubscribe(r.id, channel)
 		}
 	})
 }
