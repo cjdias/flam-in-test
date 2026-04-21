@@ -4,6 +4,7 @@ go 1.25.6
 
 require (
 	github.com/cjdias/flam-in-go v0.3.1
+	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.11.1
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/gorm v1.31.1
